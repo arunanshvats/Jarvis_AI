@@ -1,0 +1,24 @@
+# Dependencies
+**/node_modules/
+
+# Expo generated files
+**/.expo/
+**/dist/
+**/web-build/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Signing keys
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# OS files
+.DS_Store
+.vscode/
