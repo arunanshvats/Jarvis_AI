@@ -1,17 +1,28 @@
+
 {
   "expo": {
-    "name": "jarvis-app",
+    "name": "JARVIS",
     "slug": "jarvis-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow JARVIS to access your microphone.",
+          "recordAudioAndroid": true,
+          "enableBackgroundRecording": false
+        }
+      ]
+    ],
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#050b14",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"

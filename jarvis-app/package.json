@@ -5,6 +5,9 @@
   "dependencies": {
     "@expo/metro-runtime": "~58.0.17",
     "expo": "~58.0.26",
+    "expo-asset": "~58.0.21",
+    "expo-audio": "~58.0.12",
+    "expo-speech": "~58.0.4",
     "expo-status-bar": "~58.0.5",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -15,7 +18,12 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "lint": "expo lint"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~58.0.4"
+  }
 }
