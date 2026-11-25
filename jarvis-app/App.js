@@ -1,8 +1,8 @@
-
 import React, { useState } from "react";
 import {
   View,
   Text,
+  TextInput,
   Pressable,
   StyleSheet,
   StatusBar,
@@ -29,6 +29,75 @@ export default function App() {
   const [message, setMessage] = useState("SYSTEM READY");
   const [voiceStatus, setVoiceStatus] = useState("STANDBY");
   const [lastRecording, setLastRecording] = useState(null);
+  const [draft, setDraft] = useState("");
+  const [chatMessages, setChatMessages] = useState([
+    {
+      id: "welcome",
+      role: "jarvis",
+      text: "Hello. JARVIS interface is online. Type a message to begin.",
+    },
+  ]);
+  const [lastReply, setLastReply] = useState(
+    "Hello. JARVIS interface is online. Type a message to begin."
+  );
+
+  const getDemoReply = (input) => {
+    const text = input.toLowerCase().trim();
+
+    if (/^(hi|hello|hey|hii|namaste|नमस्ते)\b/.test(text)) {
+      return "Hello! I'm online. What would you like to do?";
+    }
+
+    if (text.includes("your name") || text.includes("who are you") || text.includes("tumhara naam")) {
+      return "I am JARVIS, your personal assistant interface. My AI brain is not connected yet.";
+    }
+
+    if (text.includes("time") || text.includes("samay") || text.includes("kitne baje")) {
+      return "The current time on this device is " + new Date().toLocaleTimeString() + ".";
+    }
+
+    if (text.includes("help") || text.includes("madad")) {
+      return "I can receive messages and speak demo replies right now. A real AI connection is the next upgrade.";
+    }
+
+    return "I received your message: “" + input + "”. I'm currently running in demo mode, so my AI brain is not connected yet.";
+  };
+
+  const sendMessage = () => {
+    const cleanText = draft.trim();
+    if (!cleanText) return;
+
+    const userMessage = {
+      id: Date.now().toString(),
+      role: "user",
+      text: cleanText,
+    };
+    const reply = getDemoReply(cleanText);
+    const jarvisMessage = {
+      id: (Date.now() + 1).toString(),
+      role: "jarvis",
+      text: reply,
+    };
+
+    setChatMessages((current) => [...current, userMessage, jarvisMessage]);
+    setLastReply(reply);
+    setDraft("");
+    setMessage("MESSAGE RECEIVED • DEMO MODE");
+  };
+
+  const speakReply = () => {
+    if (!lastReply) return;
+
+    Speech.stop();
+    setVoiceStatus("SPEAKING REPLY");
+
+    Speech.speak(lastReply, {
+      language: "en-IN",
+      rate: 0.92,
+      onDone: () => setVoiceStatus("STANDBY"),
+      onError: () => setVoiceStatus("VOICE ERROR"),
+    });
+  };
 
   const startRecording = async () => {
     try {
@@ -150,6 +219,51 @@ export default function App() {
       <Text style={styles.systemStatus}>{message}</Text>
 
       <View style={styles.panel}>
+        <Text style={styles.sectionTitle}>JARVIS CHAT</Text>
+        <Text style={styles.info}>
+          TEXT INTERFACE • DEMO MODE • AI BRAIN NOT CONNECTED
+        </Text>
+
+        <View style={styles.chatWindow}>
+          {chatMessages.map((item) => (
+            <View
+              key={item.id}
+              style={[
+                styles.chatBubble,
+                item.role === "user" ? styles.userBubble : styles.jarvisBubble,
+              ]}
+            >
+              <Text style={styles.chatSender}>
+                {item.role === "user" ? "YOU" : "JARVIS"}
+              </Text>
+              <Text style={styles.chatText}>{item.text}</Text>
+            </View>
+          ))}
+        </View>
+
+        <TextInput
+          style={styles.input}
+          value={draft}
+          onChangeText={setDraft}
+          placeholder="Type a message..."
+          placeholderTextColor="#66849d"
+          multiline
+          maxLength={1000}
+          onSubmitEditing={sendMessage}
+          returnKeyType="send"
+        />
+
+        <Pressable style={styles.button} onPress={sendMessage}>
+          <Text style={styles.buttonText}>SEND MESSAGE</Text>
+        </Pressable>
+
+        <Pressable style={styles.button} onPress={speakReply}>
+          <Text style={styles.buttonText}>SPEAK LAST REPLY</Text>
+        </Pressable>
+        <Text style={styles.info}>Voice: {voiceStatus}</Text>
+      </View>
+
+      <View style={styles.panel}>
         <Text style={styles.sectionTitle}>AUDIO CONTROL</Text>
 
         <Pressable
@@ -219,12 +333,13 @@ export default function App() {
         <Text style={styles.sectionTitle}>SYSTEM DIAGNOSTICS</Text>
         <Text style={styles.info}>MICROPHONE: READY FOR TEST</Text>
         <Text style={styles.info}>VOICE OUTPUT: TEST MODE</Text>
-        <Text style={styles.info}>SPEECH RECOGNITION: NOT CONNECTED</Text>
+        <Text style={styles.info}>CHAT INTERFACE: ONLINE</Text>
         <Text style={styles.info}>AI BRAIN: NOT CONNECTED</Text>
+        <Text style={styles.info}>SPEECH RECOGNITION: NOT CONNECTED</Text>
         <Text style={styles.info}>WAKE WORD: NOT CONNECTED</Text>
       </View>
 
-      <Text style={styles.footer}>JARVIS SYSTEM • VERSION 1.0</Text>
+      <Text style={styles.footer}>JARVIS SYSTEM • VERSION 1.1</Text>
     </ScrollView>
   );
 }
@@ -304,6 +419,58 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     letterSpacing: 2,
     marginBottom: 16,
+  },
+  chatWindow: {
+    backgroundColor: "#07111d",
+    borderColor: "#173a58",
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 14,
+    marginBottom: 12,
+    gap: 10,
+  },
+  chatBubble: {
+    maxWidth: "92%",
+    padding: 12,
+    borderRadius: 10,
+  },
+  userBubble: {
+    alignSelf: "flex-end",
+    backgroundColor: "#123b5d",
+    borderColor: "#269fff",
+    borderWidth: 1,
+  },
+  jarvisBubble: {
+    alignSelf: "flex-start",
+    backgroundColor: "#142333",
+    borderColor: "#31516b",
+    borderWidth: 1,
+  },
+  chatSender: {
+    color: "#54bdff",
+    fontSize: 9,
+    fontWeight: "bold",
+    letterSpacing: 1.5,
+    marginBottom: 5,
+  },
+  chatText: {
+    color: "#e8f5ff",
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  input: {
+    minHeight: 48,
+    maxHeight: 110,
+    color: "#e8f5ff",
+    backgroundColor: "#07111d",
+    borderColor: "#31516b",
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 13,
+    paddingVertical: 12,
+    fontSize: 14,
+    marginBottom: 11,
   },
   button: {
     backgroundColor: "#103b62",
