@@ -1,515 +1,862 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-  View,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
   Text,
   TextInput,
-  Pressable,
-  StyleSheet,
-  StatusBar,
-  ScrollView,
-  Platform,
+  View,
 } from "react-native";
-
-import {
-  useAudioRecorder,
-  useAudioRecorderState,
-  useAudioPlayer,
-  AudioModule,
-  RecordingPresets,
-  setAudioModeAsync,
-} from "expo-audio";
-
 import * as Speech from "expo-speech";
 
+const SYSTEM_PROMPT = `You are JARVIS, Arunansh's personal AI assistant and intelligent companion.
+
+PERSONALITY
+- Be intelligent, analytical, calm, practical, and naturally conversational.
+- Speak in casual, natural Hinglish by default. If the user writes in English or another language, follow their language.
+- Use witty humour and occasional sharp, playful sarcasm when the moment suits it. Never force jokes into serious conversations.
+- Be friendly and engaging without being clingy, romantic, overfamiliar, or fake.
+- Be honest. Never agree just to please the user. Point out weak logic, missing information, risks, and better alternatives respectfully.
+- Avoid generic praise, filler introductions, and robotic phrases such as "How may I assist you today?" in every reply.
+- Give useful detail when needed, but keep simple answers concise. Ask one clear question when essential information is missing.
+
+ASSISTANT BEHAVIOUR
+- Help with learning, coding, planning, troubleshooting, research, creativity, and everyday problem-solving.
+- Explain technical steps one at a time when the user is working in a terminal. Never pretend a command succeeded unless the user confirms it.
+- Do not claim to have browsed, changed files, sent messages, remembered something permanently, or performed an action unless it actually happened.
+- You may use the conversation history supplied in this chat for context. Do not claim permanent memory; it will be added separately.
+- Give practical warnings when an idea is unsafe, unrealistic, or likely to fail.
+- Be supportive without replacing real-world friends, family, teachers, or professionals.
+
+IDENTITY
+- Your name is JARVIS.
+- You are software: do not claim to be human or to have a body or feelings.
+- Your purpose is to help the user think clearly, learn, build things, and get useful work done.`;
+
+const initialMessages = [
+  {
+    id: "welcome",
+    role: "assistant",
+    content:
+      "JARVIS interface online. Pehle server URL connect karte hain; phir main generic demo replies ke bajaye Qwen3 se real responses dunga.",
+  },
+];
+
+function cleanBaseUrl(value) {
+  return value.trim().replace(/\/+$/, "");
+}
+
 export default function App() {
-  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const recorderState = useAudioRecorderState(audioRecorder);
-  const audioPlayer = useAudioPlayer(null);
-
-  const [message, setMessage] = useState("SYSTEM READY");
-  const [voiceStatus, setVoiceStatus] = useState("STANDBY");
-  const [lastRecording, setLastRecording] = useState(null);
+  const [apiBase, setApiBase] = useState("");
+  const [connection, setConnection] = useState("NOT CONNECTED");
+  const [connectionError, setConnectionError] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(true);
   const [draft, setDraft] = useState("");
-  const [chatMessages, setChatMessages] = useState([
-    {
-      id: "welcome",
-      role: "jarvis",
-      text: "Hello. JARVIS interface is online. Type a message to begin.",
-    },
-  ]);
-  const [lastReply, setLastReply] = useState(
-    "Hello. JARVIS interface is online. Type a message to begin."
-  );
+  const [messages, setMessages] = useState(initialMessages);
+  const [busy, setBusy] = useState(false);
+  const [lastReply, setLastReply] = useState(initialMessages[0].content);
+  const scrollRef = useRef(null);
 
-  const getDemoReply = (input) => {
-    const text = input.toLowerCase().trim();
+  useEffect(() => {
+    scrollRef.current?.scrollToEnd({ animated: true });
+  }, [messages, busy]);
 
-    if (/^(hi|hello|hey|hii|namaste|नमस्ते)\b/.test(text)) {
-      return "Hello! I'm online. What would you like to do?";
+  const checkConnection = async () => {
+    const base = cleanBaseUrl(apiBase);
+    if (!base) {
+      setConnection("URL REQUIRED");
+      setConnectionError("Paste the forwarded Codespaces URL for port 8080.");
+      return;
     }
 
-    if (text.includes("your name") || text.includes("who are you") || text.includes("tumhara naam")) {
-      return "I am JARVIS, your personal assistant interface. My AI brain is not connected yet.";
+    setConnection("CONNECTING");
+    setConnectionError("");
+    try {
+      const response = await fetch(base + "/health");
+      if (!response.ok) throw new Error("Server returned HTTP " + response.status);
+      const data = await response.json();
+      if (data.status && data.status !== "ok") {
+        throw new Error("Model server is not ready yet.");
+      }
+      setConnection("ONLINE");
+      setConnectionError("");
+      setSettingsOpen(false);
+    } catch (error) {
+      setConnection("OFFLINE");
+      setConnectionError(
+        "Could not reach llama-server. Check that port 8080 is running and its URL is correct. " +
+          (error?.message || "")
+      );
     }
-
-    if (text.includes("time") || text.includes("samay") || text.includes("kitne baje")) {
-      return "The current time on this device is " + new Date().toLocaleTimeString() + ".";
-    }
-
-    if (text.includes("help") || text.includes("madad")) {
-      return "I can receive messages and speak demo replies right now. A real AI connection is the next upgrade.";
-    }
-
-    return "I received your message: “" + input + "”. I'm currently running in demo mode, so my AI brain is not connected yet.";
   };
 
-  const sendMessage = () => {
-    const cleanText = draft.trim();
-    if (!cleanText) return;
+  const sendMessage = async () => {
+    const text = draft.trim();
+    if (!text || busy) return;
+
+    const base = cleanBaseUrl(apiBase);
+    if (!base) {
+      setSettingsOpen(true);
+      setConnection("URL REQUIRED");
+      setConnectionError("Connect port 8080 before sending a message.");
+      return;
+    }
 
     const userMessage = {
       id: Date.now().toString(),
       role: "user",
-      text: cleanText,
+      content: text,
     };
-    const reply = getDemoReply(cleanText);
-    const jarvisMessage = {
-      id: (Date.now() + 1).toString(),
-      role: "jarvis",
-      text: reply,
-    };
-
-    setChatMessages((current) => [...current, userMessage, jarvisMessage]);
-    setLastReply(reply);
+    const nextMessages = [...messages, userMessage];
+    setMessages(nextMessages);
     setDraft("");
-    setMessage("MESSAGE RECEIVED • DEMO MODE");
-  };
+    setBusy(true);
+    setConnectionError("");
 
-  const speakReply = () => {
-    if (!lastReply) return;
-
-    Speech.stop();
-    setVoiceStatus("SPEAKING REPLY");
-
-    Speech.speak(lastReply, {
-      language: "en-IN",
-      rate: 0.92,
-      onDone: () => setVoiceStatus("STANDBY"),
-      onError: () => setVoiceStatus("VOICE ERROR"),
-    });
-  };
-
-  const startRecording = async () => {
     try {
-      const permission =
-        await AudioModule.requestRecordingPermissionsAsync();
+      const history = nextMessages
+        .filter((item) => item.id !== "welcome")
+        .slice(-16)
+        .map((item) => ({
+          role: item.role === "assistant" ? "assistant" : "user",
+          content: item.content,
+        }));
 
-      if (!permission.granted) {
-        setMessage("MICROPHONE PERMISSION DENIED");
-        return;
+      const response = await fetch(base + "/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "qwen3-4b",
+          messages: [{ role: "system", content: SYSTEM_PROMPT }, ...history],
+          temperature: 0.75,
+          max_tokens: 600,
+          stream: false,
+          chat_template_kwargs: { enable_thinking: false },
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          data?.error?.message || data?.message || "HTTP " + response.status
+        );
       }
 
-      await setAudioModeAsync({
-        playsInSilentMode: true,
-        allowsRecording: true,
-      });
+      const reply =
+        data?.choices?.[0]?.message?.content ||
+        data?.choices?.[0]?.text ||
+        "I received an empty response. Please try again.";
 
-      await audioRecorder.prepareToRecordAsync();
-      audioRecorder.record();
-
-      setMessage("MICROPHONE ACTIVE");
+      const assistantMessage = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: String(reply).trim(),
+      };
+      setMessages((current) => [...current, assistantMessage]);
+      setLastReply(assistantMessage.content);
+      setConnection("ONLINE");
     } catch (error) {
-      setMessage("RECORDING ERROR: " + error.message);
+      const friendlyError =
+        "Qwen se connection nahi ho paaya. " +
+        (error?.message || "Unknown error") +
+        " — server URL, port 8080 aur server terminal check karo.";
+      setConnectionError(friendlyError);
+      setMessages((current) => [
+        ...current,
+        {
+          id: (Date.now() + 2).toString(),
+          role: "assistant",
+          content: friendlyError,
+        },
+      ]);
+      setConnection("ERROR");
+    } finally {
+      setBusy(false);
     }
   };
 
-  const stopRecording = async () => {
-    try {
-      await audioRecorder.stop();
-
-      await setAudioModeAsync({
-        playsInSilentMode: true,
-        allowsRecording: false,
-      });
-
-      setLastRecording(audioRecorder.uri || null);
-      setMessage("RECORDING COMPLETE");
-    } catch (error) {
-      setMessage("STOP ERROR: " + error.message);
-    }
-  };
-
-  const playRecording = () => {
-    if (!lastRecording) {
-      setMessage("NO RECORDING AVAILABLE");
-      return;
-    }
-
-    audioPlayer.replace(lastRecording);
-    audioPlayer.play();
-    setMessage("PLAYING LAST RECORDING");
-  };
-
-  const pauseRecording = () => {
-    audioPlayer.pause();
-    setMessage("PLAYBACK PAUSED");
-  };
-
-  const downloadRecording = () => {
-    if (Platform.OS !== "web" || !lastRecording) {
-      setMessage("DOWNLOAD AVAILABLE IN BROWSER PREVIEW");
-      return;
-    }
-
-    const link = document.createElement("a");
-    link.href = lastRecording;
-    link.download = "jarvis-recording.webm";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    setMessage("DOWNLOAD REQUESTED");
-  };
-
-  const speakEnglish = () => {
+  const speakLastReply = () => {
+    if (!lastReply) return;
     Speech.stop();
-    setVoiceStatus("SPEAKING ENGLISH");
-
-    Speech.speak("Hello. JARVIS voice system is online.", {
-      language: "en-IN",
-      rate: 0.92,
-      onDone: () => setVoiceStatus("STANDBY"),
-      onError: () => setVoiceStatus("VOICE ERROR"),
-    });
-  };
-
-  const speakHindi = () => {
-    Speech.stop();
-    setVoiceStatus("SPEAKING HINDI");
-
-    Speech.speak("नमस्ते। JARVIS वॉइस सिस्टम तैयार है।", {
+    Speech.speak(lastReply, {
       language: "hi-IN",
-      rate: 0.9,
-      onDone: () => setVoiceStatus("STANDBY"),
-      onError: () => setVoiceStatus("VOICE ERROR"),
+      rate: 0.94,
+      pitch: 1.0,
     });
   };
 
-  const stopVoice = () => {
+  const stopSpeaking = () => Speech.stop();
+
+  const resetChat = () => {
     Speech.stop();
-    setVoiceStatus("STANDBY");
+    setMessages(initialMessages);
+    setLastReply(initialMessages[0].content);
+    setConnectionError("");
   };
+
+  const statusColor =
+    connection === "ONLINE"
+      ? "#56e0b0"
+      : connection === "CONNECTING"
+        ? "#f4c76b"
+        : "#ff8290";
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#050b14" />
-
-      <Text style={styles.topLabel}>PERSONAL AI SYSTEM</Text>
-      <Text style={styles.title}>J.A.R.V.I.S</Text>
-      <Text style={styles.subtitle}>
-        JUST A RATHER VERY INTELLIGENT SYSTEM
-      </Text>
-
-      <View style={styles.orb}>
-        <View style={styles.innerOrb}>
-          <Text style={styles.orbText}>J</Text>
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <StatusBar barStyle="light-content" backgroundColor="#060b14" />
+      <View style={styles.backgroundGlow} />
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.page}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.topBar}>
+          <View style={styles.brandMark}>
+            <Text style={styles.brandMarkText}>J</Text>
+          </View>
+          <View style={styles.brandCopy}>
+            <Text style={styles.brandName}>J.A.R.V.I.S</Text>
+            <Text style={styles.brandTag}>PERSONAL INTELLIGENCE SYSTEM</Text>
+          </View>
+          <View style={styles.statusPill}>
+            <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+            <Text style={[styles.statusText, { color: statusColor }]}>
+              {connection}
+            </Text>
+          </View>
         </View>
-      </View>
 
-      <Text style={styles.systemStatus}>{message}</Text>
-
-      <View style={styles.panel}>
-        <Text style={styles.sectionTitle}>JARVIS CHAT</Text>
-        <Text style={styles.info}>
-          TEXT INTERFACE • DEMO MODE • AI BRAIN NOT CONNECTED
-        </Text>
-
-        <View style={styles.chatWindow}>
-          {chatMessages.map((item) => (
-            <View
-              key={item.id}
-              style={[
-                styles.chatBubble,
-                item.role === "user" ? styles.userBubble : styles.jarvisBubble,
-              ]}
-            >
-              <Text style={styles.chatSender}>
-                {item.role === "user" ? "YOU" : "JARVIS"}
-              </Text>
-              <Text style={styles.chatText}>{item.text}</Text>
+        <View style={styles.hero}>
+          <View style={styles.orbOuter}>
+            <View style={styles.orbRing} />
+            <View style={styles.orbCore}>
+              <Text style={styles.orbLetter}>J</Text>
+              <Text style={styles.orbCaption}>AI CORE</Text>
             </View>
-          ))}
+          </View>
+          <Text style={styles.heroTitle}>At your service.</Text>
+          <Text style={styles.heroSubtitle}>
+            Your assistant. Your workflow. One conversation.
+          </Text>
+          <View style={styles.capabilityRow}>
+            <Text style={styles.capability}>QWEN3 4B</Text>
+            <View style={styles.capabilityDivider} />
+            <Text style={styles.capability}>LOCAL MODEL</Text>
+            <View style={styles.capabilityDivider} />
+            <Text style={styles.capability}>LLAMA.CPP</Text>
+          </View>
         </View>
 
-        <TextInput
-          style={styles.input}
-          value={draft}
-          onChangeText={setDraft}
-          placeholder="Type a message..."
-          placeholderTextColor="#66849d"
-          multiline
-          maxLength={1000}
-          onSubmitEditing={sendMessage}
-          returnKeyType="send"
-        />
+        <View style={styles.panel}>
+          <Pressable
+            style={styles.panelHeading}
+            onPress={() => setSettingsOpen((value) => !value)}
+          >
+            <View>
+              <Text style={styles.eyebrow}>CONNECTION</Text>
+              <Text style={styles.panelTitle}>AI engine link</Text>
+            </View>
+            <Text style={styles.panelAction}>
+              {settingsOpen ? "HIDE −" : "SETTINGS +"}
+            </Text>
+          </Pressable>
 
-        <Pressable style={styles.button} onPress={sendMessage}>
-          <Text style={styles.buttonText}>SEND MESSAGE</Text>
-        </Pressable>
+          {settingsOpen && (
+            <View style={styles.settingsBody}>
+              <Text style={styles.helperText}>
+                Codespaces ke PORTS tab se port 8080 ka forwarded URL copy
+                karke yahan paste karo. URL mein /v1 ya /health mat jodna.
+              </Text>
+              <TextInput
+                value={apiBase}
+                onChangeText={setApiBase}
+                placeholder="https://YOUR-CODESPACE-8080.app.github.dev"
+                placeholderTextColor="#60748c"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                style={styles.urlInput}
+              />
+              <Pressable
+                style={[
+                  styles.connectButton,
+                  connection === "CONNECTING" && styles.disabledButton,
+                ]}
+                onPress={checkConnection}
+                disabled={connection === "CONNECTING"}
+              >
+                {connection === "CONNECTING" ? (
+                  <ActivityIndicator color="#06101b" />
+                ) : (
+                  <Text style={styles.connectButtonText}>TEST CONNECTION</Text>
+                )}
+              </Pressable>
+              {!!connectionError && (
+                <Text style={styles.errorText}>{connectionError}</Text>
+              )}
+            </View>
+          )}
+        </View>
 
-        <Pressable style={styles.button} onPress={speakReply}>
-          <Text style={styles.buttonText}>SPEAK LAST REPLY</Text>
-        </Pressable>
-        <Text style={styles.info}>Voice: {voiceStatus}</Text>
-      </View>
+        <View style={styles.chatPanel}>
+          <View style={styles.chatHeader}>
+            <View>
+              <Text style={styles.eyebrow}>LIVE SESSION</Text>
+              <Text style={styles.panelTitle}>Talk to JARVIS</Text>
+            </View>
+            <Pressable onPress={resetChat} style={styles.resetButton}>
+              <Text style={styles.resetText}>NEW CHAT ↺</Text>
+            </Pressable>
+          </View>
 
-      <View style={styles.panel}>
-        <Text style={styles.sectionTitle}>AUDIO CONTROL</Text>
+          <View style={styles.messageList}>
+            {messages.map((item) => (
+              <View
+                key={item.id}
+                style={[
+                  styles.messageRow,
+                  item.role === "user" ? styles.userRow : styles.assistantRow,
+                ]}
+              >
+                {item.role === "assistant" && (
+                  <View style={styles.miniAvatar}>
+                    <Text style={styles.miniAvatarText}>J</Text>
+                  </View>
+                )}
+                <View
+                  style={[
+                    styles.bubble,
+                    item.role === "user" ? styles.userBubble : styles.aiBubble,
+                  ]}
+                >
+                  <Text style={styles.messageLabel}>
+                    {item.role === "user" ? "YOU" : "JARVIS"}
+                  </Text>
+                  <Text style={styles.messageText}>{item.content}</Text>
+                </View>
+              </View>
+            ))}
+            {busy && (
+              <View style={[styles.messageRow, styles.assistantRow]}>
+                <View style={styles.miniAvatar}>
+                  <Text style={styles.miniAvatarText}>J</Text>
+                </View>
+                <View style={[styles.bubble, styles.aiBubble, styles.thinkingBubble]}>
+                  <ActivityIndicator color="#70d8ff" size="small" />
+                  <Text style={styles.thinkingText}>JARVIS IS THINKING</Text>
+                </View>
+              </View>
+            )}
+          </View>
 
-        <Pressable
-          style={[
-            styles.button,
-            recorderState.isRecording && styles.activeButton,
-          ]}
-          onPress={
-            recorderState.isRecording ? stopRecording : startRecording
-          }
-        >
-          <Text style={styles.buttonText}>
-            {recorderState.isRecording
-              ? "STOP RECORDING"
-              : "START RECORDING"}
+          <TextInput
+            value={draft}
+            onChangeText={setDraft}
+            placeholder="Message JARVIS..."
+            placeholderTextColor="#70849a"
+            multiline
+            maxLength={3000}
+            style={styles.composer}
+          />
+          <View style={styles.composerActions}>
+            <Text style={styles.inputHint}>Hinglish • English • Anything</Text>
+            <Pressable
+              style={[
+                styles.sendButton,
+                (!draft.trim() || busy) && styles.disabledButton,
+              ]}
+              onPress={sendMessage}
+              disabled={!draft.trim() || busy}
+            >
+              <Text style={styles.sendButtonText}>
+                {busy ? "THINKING..." : "SEND  ↗"}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.toolsPanel}>
+          <View style={styles.toolCopy}>
+            <Text style={styles.eyebrow}>VOICE OUTPUT</Text>
+            <Text style={styles.toolTitle}>Hear the last reply</Text>
+            <Text style={styles.helperText}>
+              Device ki available Hindi voice use hogi. Voice input / speech
+              recognition abhi next development phase mein hai.
+            </Text>
+          </View>
+          <View style={styles.voiceActions}>
+            <Pressable style={styles.voiceButton} onPress={speakLastReply}>
+              <Text style={styles.voiceButtonText}>▶  SPEAK</Text>
+            </Pressable>
+            <Pressable style={styles.stopVoiceButton} onPress={stopSpeaking}>
+              <Text style={styles.stopVoiceText}>STOP</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.footer}>
+          <View style={styles.footerLine} />
+          <Text style={styles.footerText}>JARVIS • BUILT TO THINK WITH YOU</Text>
+          <Text style={styles.footerSubtext}>
+            Chat context lasts for this session. Persistent memory is a separate
+            feature we will add next.
           </Text>
-        </Pressable>
-
-        <Text style={styles.info}>
-          Microphone: {recorderState.isRecording ? "ACTIVE" : "STANDBY"}
-        </Text>
-
-        <Text style={styles.info}>
-          {lastRecording ? "Recording ready" : "No recording yet"}
-        </Text>
-
-        <Pressable
-          style={styles.button}
-          onPress={playRecording}
-          disabled={!lastRecording}
-        >
-          <Text style={styles.buttonText}>PLAY RECORDING</Text>
-        </Pressable>
-
-        <Pressable style={styles.button} onPress={pauseRecording}>
-          <Text style={styles.buttonText}>PAUSE PLAYBACK</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.button}
-          onPress={downloadRecording}
-          disabled={!lastRecording}
-        >
-          <Text style={styles.buttonText}>DOWNLOAD RECORDING</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.panel}>
-        <Text style={styles.sectionTitle}>VOICE OUTPUT</Text>
-
-        <Pressable style={styles.button} onPress={speakEnglish}>
-          <Text style={styles.buttonText}>TEST ENGLISH VOICE</Text>
-        </Pressable>
-
-        <Pressable style={styles.button} onPress={speakHindi}>
-          <Text style={styles.buttonText}>TEST HINDI VOICE</Text>
-        </Pressable>
-
-        <Pressable style={styles.stopButton} onPress={stopVoice}>
-          <Text style={styles.buttonText}>STOP VOICE</Text>
-        </Pressable>
-
-        <Text style={styles.info}>Voice: {voiceStatus}</Text>
-      </View>
-
-      <View style={styles.panel}>
-        <Text style={styles.sectionTitle}>SYSTEM DIAGNOSTICS</Text>
-        <Text style={styles.info}>MICROPHONE: READY FOR TEST</Text>
-        <Text style={styles.info}>VOICE OUTPUT: TEST MODE</Text>
-        <Text style={styles.info}>CHAT INTERFACE: ONLINE</Text>
-        <Text style={styles.info}>AI BRAIN: NOT CONNECTED</Text>
-        <Text style={styles.info}>SPEECH RECOGNITION: NOT CONNECTED</Text>
-        <Text style={styles.info}>WAKE WORD: NOT CONNECTED</Text>
-      </View>
-
-      <Text style={styles.footer}>JARVIS SYSTEM • VERSION 1.1</Text>
-    </ScrollView>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    backgroundColor: "#050b14",
+  screen: {
+    flex: 1,
+    backgroundColor: "#060b14",
+  },
+  backgroundGlow: {
+    position: "absolute",
+    top: -140,
+    alignSelf: "center",
+    width: 360,
+    height: 360,
+    borderRadius: 180,
+    backgroundColor: "#0b3150",
+    opacity: 0.24,
+  },
+  page: {
+    width: "100%",
+    maxWidth: 760,
+    alignSelf: "center",
+    paddingHorizontal: 18,
+    paddingTop: 28,
+    paddingBottom: 42,
+  },
+  topBar: {
+    flexDirection: "row",
     alignItems: "center",
-    padding: 22,
-    paddingTop: 55,
+    marginBottom: 22,
   },
-  topLabel: {
-    color: "#4baeff",
-    fontSize: 12,
-    letterSpacing: 4,
+  brandMark: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#3b9bd2",
+    backgroundColor: "#0d2336",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  title: {
-    color: "#e8f5ff",
-    fontSize: 38,
-    fontWeight: "bold",
-    letterSpacing: 5,
-    marginTop: 10,
+  brandMarkText: {
+    color: "#a9e8ff",
+    fontSize: 25,
+    fontWeight: "300",
   },
-  subtitle: {
-    color: "#66849d",
-    fontSize: 9,
+  brandCopy: {
+    flex: 1,
+    marginLeft: 11,
+  },
+  brandName: {
+    color: "#e8f6ff",
+    fontSize: 17,
+    fontWeight: "800",
+    letterSpacing: 3,
+  },
+  brandTag: {
+    color: "#6e91aa",
+    fontSize: 8,
     letterSpacing: 1.5,
-    marginTop: 8,
-    textAlign: "center",
+    marginTop: 4,
   },
-  orb: {
-    width: 170,
-    height: 170,
-    borderRadius: 85,
-    borderWidth: 2,
-    borderColor: "#168dff",
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#28445b",
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: "#0b1724",
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginRight: 7,
+  },
+  statusText: {
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.7,
+  },
+  hero: {
+    alignItems: "center",
+    paddingTop: 8,
+    paddingBottom: 24,
+  },
+  orbOuter: {
+    width: 166,
+    height: 166,
+    borderRadius: 83,
+    borderWidth: 1,
+    borderColor: "#1e6d99",
     alignItems: "center",
     justifyContent: "center",
-    marginVertical: 32,
-    backgroundColor: "#0a1d32",
+    backgroundColor: "#091b2b",
+    marginBottom: 18,
   },
-  innerOrb: {
-    width: 125,
-    height: 125,
-    borderRadius: 63,
-    backgroundColor: "#103b62",
-    borderWidth: 2,
-    borderColor: "#54bdff",
+  orbRing: {
+    position: "absolute",
+    width: 142,
+    height: 142,
+    borderRadius: 71,
+    borderWidth: 1,
+    borderColor: "#3aaddd",
+    opacity: 0.55,
+  },
+  orbCore: {
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    borderWidth: 1,
+    borderColor: "#72d9ff",
+    backgroundColor: "#103653",
     alignItems: "center",
     justifyContent: "center",
   },
-  orbText: {
-    color: "#bdeaff",
-    fontSize: 65,
+  orbLetter: {
+    color: "#d7f5ff",
+    fontSize: 54,
     fontWeight: "200",
+    lineHeight: 60,
   },
-  systemStatus: {
-    color: "#53c6ff",
-    fontSize: 13,
+  orbCaption: {
+    color: "#75c9ee",
+    fontSize: 8,
     letterSpacing: 2,
-    marginBottom: 20,
+  },
+  heroTitle: {
+    color: "#eff9ff",
+    fontSize: 27,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+  heroSubtitle: {
+    color: "#91a9bd",
+    fontSize: 12,
+    marginTop: 7,
     textAlign: "center",
+  },
+  capabilityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 17,
+    borderWidth: 1,
+    borderColor: "#203b50",
+    backgroundColor: "#0a1521",
+    borderRadius: 20,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+  },
+  capability: {
+    color: "#78c9ed",
+    fontSize: 8,
+    fontWeight: "800",
+    letterSpacing: 1,
+  },
+  capabilityDivider: {
+    width: 1,
+    height: 10,
+    backgroundColor: "#35536a",
+    marginHorizontal: 10,
   },
   panel: {
-    width: "100%",
-    backgroundColor: "#0b1725",
-    borderColor: "#173a58",
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 18,
-    marginBottom: 17,
+    borderColor: "#1c3a52",
+    borderRadius: 16,
+    backgroundColor: "#0b1622",
+    padding: 16,
+    marginBottom: 14,
   },
-  sectionTitle: {
-    color: "#54bdff",
-    fontSize: 13,
-    fontWeight: "bold",
+  panelHeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  eyebrow: {
+    color: "#66c8f1",
+    fontSize: 9,
+    fontWeight: "800",
     letterSpacing: 2,
-    marginBottom: 16,
   },
-  chatWindow: {
-    backgroundColor: "#07111d",
-    borderColor: "#173a58",
+  panelTitle: {
+    color: "#edf7ff",
+    fontSize: 17,
+    fontWeight: "700",
+    marginTop: 5,
+  },
+  panelAction: {
+    color: "#83c9e9",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 1,
+  },
+  settingsBody: {
+    marginTop: 13,
+  },
+  helperText: {
+    color: "#91a7b9",
+    fontSize: 11,
+    lineHeight: 17,
+  },
+  urlInput: {
+    color: "#eaf7ff",
+    backgroundColor: "#07111b",
     borderWidth: 1,
+    borderColor: "#29485f",
     borderRadius: 10,
-    padding: 10,
-    marginTop: 14,
-    marginBottom: 12,
-    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 12,
+    marginTop: 12,
   },
-  chatBubble: {
-    maxWidth: "92%",
-    padding: 12,
+  connectButton: {
+    backgroundColor: "#70d7f7",
     borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 43,
+    marginTop: 10,
+  },
+  connectButtonText: {
+    color: "#06101b",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+  },
+  errorText: {
+    color: "#ff9aa5",
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 10,
+  },
+  chatPanel: {
+    borderWidth: 1,
+    borderColor: "#1c3a52",
+    borderRadius: 16,
+    backgroundColor: "#0b1622",
+    padding: 14,
+    marginBottom: 14,
+  },
+  chatHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  resetButton: {
+    borderWidth: 1,
+    borderColor: "#34536a",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  resetText: {
+    color: "#a5c9dc",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.7,
+  },
+  messageList: {
+    backgroundColor: "#07111b",
+    borderWidth: 1,
+    borderColor: "#1b3448",
+    borderRadius: 12,
+    padding: 11,
+    minHeight: 180,
+  },
+  messageRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    marginBottom: 12,
+  },
+  assistantRow: {
+    justifyContent: "flex-start",
+  },
+  userRow: {
+    justifyContent: "flex-end",
+  },
+  miniAvatar: {
+    width: 25,
+    height: 25,
+    borderRadius: 9,
+    backgroundColor: "#123954",
+    borderWidth: 1,
+    borderColor: "#4bb5e3",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 7,
+  },
+  miniAvatarText: {
+    color: "#c8f1ff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  bubble: {
+    maxWidth: "86%",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  aiBubble: {
+    backgroundColor: "#112638",
+    borderWidth: 1,
+    borderColor: "#274960",
+    borderBottomLeftRadius: 3,
   },
   userBubble: {
-    alignSelf: "flex-end",
-    backgroundColor: "#123b5d",
-    borderColor: "#269fff",
+    backgroundColor: "#123b5b",
     borderWidth: 1,
+    borderColor: "#287db0",
+    borderBottomRightRadius: 3,
   },
-  jarvisBubble: {
-    alignSelf: "flex-start",
-    backgroundColor: "#142333",
-    borderColor: "#31516b",
-    borderWidth: 1,
-  },
-  chatSender: {
-    color: "#54bdff",
-    fontSize: 9,
-    fontWeight: "bold",
-    letterSpacing: 1.5,
+  messageLabel: {
+    color: "#79c9ed",
+    fontSize: 8,
+    fontWeight: "900",
+    letterSpacing: 1.3,
     marginBottom: 5,
   },
-  chatText: {
-    color: "#e8f5ff",
+  messageText: {
+    color: "#e8f4fc",
     fontSize: 13,
     lineHeight: 19,
   },
-  input: {
+  thinkingBubble: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+  },
+  thinkingText: {
+    color: "#8bd8f5",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 1,
+  },
+  composer: {
     minHeight: 48,
-    maxHeight: 110,
-    color: "#e8f5ff",
-    backgroundColor: "#07111d",
-    borderColor: "#31516b",
+    maxHeight: 120,
+    color: "#eef8ff",
+    backgroundColor: "#07111b",
     borderWidth: 1,
-    borderRadius: 9,
+    borderColor: "#31536d",
+    borderRadius: 11,
     paddingHorizontal: 13,
     paddingVertical: 12,
-    fontSize: 14,
-    marginBottom: 11,
+    fontSize: 13,
+    marginTop: 12,
   },
-  button: {
-    backgroundColor: "#103b62",
-    borderColor: "#269fff",
-    borderWidth: 1,
-    padding: 15,
-    borderRadius: 9,
+  composerActions: {
+    flexDirection: "row",
     alignItems: "center",
-    marginBottom: 11,
+    justifyContent: "space-between",
+    marginTop: 10,
   },
-  activeButton: {
-    backgroundColor: "#7b2634",
-    borderColor: "#ff667b",
+  inputHint: {
+    color: "#7791a5",
+    fontSize: 9,
   },
-  stopButton: {
-    backgroundColor: "#29202a",
-    borderColor: "#b85b70",
-    borderWidth: 1,
-    padding: 15,
+  sendButton: {
+    backgroundColor: "#72d8f7",
     borderRadius: 9,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+  },
+  sendButtonText: {
+    color: "#06101b",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
+  toolsPanel: {
+    borderWidth: 1,
+    borderColor: "#1c3a52",
+    borderRadius: 16,
+    backgroundColor: "#0b1622",
+    padding: 16,
+    marginBottom: 14,
+  },
+  toolTitle: {
+    color: "#edf7ff",
+    fontSize: 15,
+    fontWeight: "700",
+    marginTop: 5,
+    marginBottom: 7,
+  },
+  voiceActions: {
+    flexDirection: "row",
+    marginTop: 13,
+    gap: 9,
+  },
+  voiceButton: {
+    flex: 1,
+    backgroundColor: "#123e5b",
+    borderWidth: 1,
+    borderColor: "#3188b5",
+    borderRadius: 9,
+    paddingVertical: 12,
     alignItems: "center",
-    marginBottom: 11,
   },
-  buttonText: {
-    color: "#e8f5ff",
-    fontSize: 12,
-    fontWeight: "bold",
-    letterSpacing: 1.5,
+  voiceButtonText: {
+    color: "#d7f5ff",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1,
   },
-  info: {
-    color: "#9ab3c8",
-    fontSize: 11,
-    marginTop: 9,
+  stopVoiceButton: {
+    borderWidth: 1,
+    borderColor: "#754352",
+    borderRadius: 9,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  stopVoiceText: {
+    color: "#ffabb5",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1,
   },
   footer: {
-    color: "#47647d",
-    fontSize: 10,
+    alignItems: "center",
+    paddingTop: 10,
+  },
+  footerLine: {
+    width: 50,
+    height: 1,
+    backgroundColor: "#35617b",
+    marginBottom: 13,
+  },
+  footerText: {
+    color: "#82a8bd",
+    fontSize: 9,
+    fontWeight: "800",
     letterSpacing: 2,
-    marginTop: 10,
-    marginBottom: 25,
+  },
+  footerSubtext: {
+    color: "#627b8f",
+    fontSize: 9,
+    textAlign: "center",
+    lineHeight: 14,
+    marginTop: 7,
+    maxWidth: 320,
   },
 });
